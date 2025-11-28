@@ -21,7 +21,7 @@ const TOTAL_NUMBERED_PHOTOS = 31;
 const MAX_TEXTURE_SIZE = 2048;
 
 const getPhotosBase = () => {
-  return "/photos";
+  return "./photos";
 };
 
 const photosBase = getPhotosBase();
