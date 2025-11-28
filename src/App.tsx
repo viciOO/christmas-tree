@@ -19,9 +19,9 @@ import { GestureRecognizer, FilesetResolver, DrawingUtils } from "@mediapipe/tas
 // --- 动态生成照片列表 (top.jpg + 1.jpg 到 31.jpg) ---
 const TOTAL_NUMBERED_PHOTOS = 31;
 const MAX_TEXTURE_SIZE = 2048;
-// 构建与部署环境匹配的静态资源前缀（兼容 GitHub Pages 等子路径）
-const basePath = (import.meta.env.BASE_URL ?? '/').replace(/\/+$/, '');
-const photosBase = `${basePath === '' ? '/' : `${basePath}/`}photos`;
+
+// Vite + Vercel 直接使用绝对路径
+const photosBase = "/christmas-tree/photos";
 const bodyPhotoPaths = [
   `${photosBase}/top.JPG`,
   ...Array.from({ length: TOTAL_NUMBERED_PHOTOS }, (_, i) => `${photosBase}/${i + 1}.JPG`)
