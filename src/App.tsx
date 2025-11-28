@@ -1,5 +1,5 @@
-import { useState, useMemo, useRef, useEffect, Suspense } from 'react';
-import { Canvas, useFrame, extend } from '@react-three/fiber';
+import { useState, useMemo, useRef, useEffect, Suspense, useCallback } from 'react';
+import { Canvas, useFrame, extend, useThree } from '@react-three/fiber';
 import {
   OrbitControls,
   Environment,
@@ -18,10 +18,13 @@ import { GestureRecognizer, FilesetResolver, DrawingUtils } from "@mediapipe/tas
 
 // --- 动态生成照片列表 (top.jpg + 1.jpg 到 31.jpg) ---
 const TOTAL_NUMBERED_PHOTOS = 31;
-// 修改：将 top.jpg 加入到数组开头
+const MAX_TEXTURE_SIZE = 2048;
+// 构建与部署环境匹配的静态资源前缀（兼容 GitHub Pages 等子路径）
+const basePath = (import.meta.env.BASE_URL ?? '/').replace(/\/+$/, '');
+const photosBase = `${basePath === '' ? '/' : `${basePath}/`}photos`;
 const bodyPhotoPaths = [
-  '/photos/top.jpg',
-  ...Array.from({ length: TOTAL_NUMBERED_PHOTOS }, (_, i) => `/photos/${i + 1}.jpg`)
+  `${photosBase}/top.JPG`,
+  ...Array.from({ length: TOTAL_NUMBERED_PHOTOS }, (_, i) => `${photosBase}/${i + 1}.JPG`)
 ];
 
 // --- 视觉配置 ---
@@ -88,6 +91,82 @@ const getTreePosition = () => {
   return [r * Math.cos(theta), y, r * Math.sin(theta)];
 };
 
+// --- Component: Shooting Stars ---
+const ShootingStars = ({ count = 18 }: { count?: number }) => {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+  const positions = useRef(Array.from({ length: count }, () => new THREE.Vector3()));
+  const velocities = useRef(
+    Array.from({ length: count }, () => new THREE.Vector3())
+  );
+  const timers = useRef(new Array(count).fill(0));
+  const geometry = useMemo(() => new THREE.CylinderGeometry(0, 0.08, 1.2, 6), []);
+  const material = useMemo(() => new THREE.MeshBasicMaterial({ color: '#FAFAFF', transparent: true, opacity: 0.9 }), []);
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+      material.dispose();
+    };
+  }, [geometry, material]);
+
+  const resetStar = useCallback(
+    (i: number) => {
+      const startX = 40 + Math.random() * 20;
+      const startY = 20 + Math.random() * 20;
+      const startZ = (Math.random() - 0.5) * 60;
+      positions.current[i].set(startX, startY, startZ);
+
+      const speed = 25 + Math.random() * 20;
+      const dir = new THREE.Vector3(-0.8 - Math.random() * 0.2, -0.3 - Math.random() * 0.2, (Math.random() - 0.5) * 0.2).normalize();
+      velocities.current[i].copy(dir.multiplyScalar(speed));
+
+      timers.current[i] = 0;
+    },
+    []
+  );
+
+  useEffect(() => {
+    for (let i = 0; i < count; i++) {
+      resetStar(i);
+      if (meshRef.current) {
+        dummy.position.copy(positions.current[i]);
+        dummy.scale.setScalar(0.4 + Math.random() * 0.2);
+        dummy.updateMatrix();
+        meshRef.current.setMatrixAt(i, dummy.matrix);
+      }
+    }
+    if (meshRef.current) meshRef.current.instanceMatrix.needsUpdate = true;
+  }, [count, dummy, resetStar]);
+
+  useFrame((_, delta) => {
+    if (!meshRef.current) return;
+    for (let i = 0; i < count; i++) {
+      positions.current[i].addScaledVector(velocities.current[i], delta);
+      timers.current[i] += delta;
+
+      if (
+        positions.current[i].x < -60 ||
+        positions.current[i].y < -10 ||
+        timers.current[i] > 2.5
+      ) {
+        resetStar(i);
+      }
+
+      const trailScale = 0.4 + Math.sin(timers.current[i] * 8) * 0.08;
+      dummy.position.copy(positions.current[i]);
+      dummy.scale.set(0.15 + trailScale * 0.4, 0.15 + trailScale * 0.4, 0.6 + trailScale);
+      const trailRot = Math.atan2(velocities.current[i].y, velocities.current[i].x);
+      dummy.rotation.set(0, trailRot, 0);
+      dummy.updateMatrix();
+      meshRef.current.setMatrixAt(i, dummy.matrix);
+    }
+    meshRef.current.instanceMatrix.needsUpdate = true;
+  });
+
+  return <instancedMesh ref={meshRef} args={[geometry, material, count]} />;
+};
+
 // --- Component: Foliage ---
 const Foliage = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   const materialRef = useRef<any>(null);
@@ -125,12 +204,60 @@ const Foliage = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
 
 // --- Component: Photo Ornaments (Double-Sided Polaroid) ---
 const PhotoOrnaments = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
-  const textures = useTexture(CONFIG.photos.body);
+  const textures = useTexture(CONFIG.photos.body) as THREE.Texture[];
   const count = CONFIG.counts.ornaments;
   const groupRef = useRef<THREE.Group>(null);
+  const { gl } = useThree();
 
   const borderGeometry = useMemo(() => new THREE.PlaneGeometry(1.2, 1.5), []);
   const photoGeometry = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
+
+  const optimizedTextures = useMemo(() => {
+    const maxAnisotropy = Math.min(4, gl.capabilities.getMaxAnisotropy());
+    return textures.map(texture => {
+      if (!texture) return texture;
+      const image: any = texture.image;
+      const width = image?.naturalWidth ?? image?.width ?? 0;
+      const height = image?.naturalHeight ?? image?.height ?? 0;
+      const largestSide = Math.max(width, height);
+      if (typeof document !== 'undefined' && largestSide > MAX_TEXTURE_SIZE && width > 0 && height > 0) {
+        const scale = MAX_TEXTURE_SIZE / largestSide;
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(width * scale);
+        canvas.height = Math.round(height * scale);
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+          texture.image = canvas;
+        }
+      }
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.generateMipmaps = true;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.anisotropy = maxAnisotropy;
+      texture.needsUpdate = true;
+      return texture;
+    });
+  }, [textures, gl]);
+
+  const photoMaterials = useMemo(() => {
+    return optimizedTextures.map(texture => new THREE.MeshStandardMaterial({
+      map: texture,
+      roughness: 0.5,
+      metalness: 0,
+      emissive: CONFIG.colors.white,
+      emissiveMap: texture,
+      emissiveIntensity: 1.0,
+      side: THREE.FrontSide
+    }));
+  }, [optimizedTextures]);
+
+  useEffect(() => {
+    return () => {
+      photoMaterials.forEach(mat => mat.dispose());
+    };
+  }, [photoMaterials]);
 
   const data = useMemo(() => {
     return new Array(count).fill(0).map((_, i) => {
@@ -201,28 +328,14 @@ const PhotoOrnaments = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
         <group key={i} scale={[obj.scale, obj.scale, obj.scale]} rotation={state === 'CHAOS' ? obj.chaosRotation : [0,0,0]}>
           {/* 正面 */}
           <group position={[0, 0, 0.015]}>
-            <mesh geometry={photoGeometry}>
-              <meshStandardMaterial
-                map={textures[obj.textureIndex]}
-                roughness={0.5} metalness={0}
-                emissive={CONFIG.colors.white} emissiveMap={textures[obj.textureIndex]} emissiveIntensity={1.0}
-                side={THREE.FrontSide}
-              />
-            </mesh>
+            <mesh geometry={photoGeometry} material={photoMaterials[obj.textureIndex]} />
             <mesh geometry={borderGeometry} position={[0, -0.15, -0.01]}>
               <meshStandardMaterial color={obj.borderColor} roughness={0.9} metalness={0} side={THREE.FrontSide} />
             </mesh>
           </group>
           {/* 背面 */}
           <group position={[0, 0, -0.015]} rotation={[0, Math.PI, 0]}>
-            <mesh geometry={photoGeometry}>
-              <meshStandardMaterial
-                map={textures[obj.textureIndex]}
-                roughness={0.5} metalness={0}
-                emissive={CONFIG.colors.white} emissiveMap={textures[obj.textureIndex]} emissiveIntensity={1.0}
-                side={THREE.FrontSide}
-              />
-            </mesh>
+            <mesh geometry={photoGeometry} material={photoMaterials[obj.textureIndex]} />
             <mesh geometry={borderGeometry} position={[0, -0.15, -0.01]}>
               <meshStandardMaterial color={obj.borderColor} roughness={0.9} metalness={0} side={THREE.FrontSide} />
             </mesh>
@@ -396,6 +509,7 @@ const Experience = ({ sceneState, rotationSpeed }: { sceneState: 'CHAOS' | 'FORM
 
       <color attach="background" args={['#000300']} />
       <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
+      <ShootingStars />
       <Environment preset="night" background={false} />
 
       <ambientLight intensity={0.4} color="#003311" />
@@ -403,7 +517,7 @@ const Experience = ({ sceneState, rotationSpeed }: { sceneState: 'CHAOS' | 'FORM
       <pointLight position={[-30, 10, -30]} intensity={50} color={CONFIG.colors.gold} />
       <pointLight position={[0, -20, 10]} intensity={30} color="#ffffff" />
 
-      <group position={[0, -6, 0]}>
+      <group position={[0, -3, 0]}>
         <Foliage state={sceneState} />
         <Suspense fallback={null}>
            <PhotoOrnaments state={sceneState} />
@@ -513,7 +627,7 @@ export default function GrandTreeApp() {
   return (
     <div style={{ width: '100vw', height: '100vh', backgroundColor: '#000', position: 'relative', overflow: 'hidden' }}>
       <div style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, zIndex: 1 }}>
-        <Canvas dpr={[1, 2]} gl={{ toneMapping: THREE.ReinhardToneMapping }} shadows>
+        <Canvas dpr={[1, 1.5]} gl={{ toneMapping: THREE.ReinhardToneMapping }} shadows>
             <Experience sceneState={sceneState} rotationSpeed={rotationSpeed} />
         </Canvas>
       </div>
