@@ -20,16 +20,11 @@ import { GestureRecognizer, FilesetResolver, DrawingUtils } from "@mediapipe/tas
 const TOTAL_NUMBERED_PHOTOS = 31;
 const MAX_TEXTURE_SIZE = 2048;
 
-const getPhotosBase = () => {
-  // 根据 Vite 的基础配置自动适配
-  const base = import.meta.env.BASE_URL;
-  return `${base}photos`;
-};
 
-const photosBase = getPhotosBase();
+const photosBase = "/photos";
 const bodyPhotoPaths = [
-  `${photosBase}/top.JPG`,
-  ...Array.from({ length: TOTAL_NUMBERED_PHOTOS }, (_, i) => `${photosBase}/${i + 1}.JPG`)
+  `${photosBase}/top.jpg`,
+  ...Array.from({ length: TOTAL_NUMBERED_PHOTOS }, (_, i) => `${photosBase}/${i + 1}.jpg`)
 ];
 
 // --- 视觉配置 ---
