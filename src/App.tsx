@@ -21,13 +21,7 @@ const TOTAL_NUMBERED_PHOTOS = 31;
 const MAX_TEXTURE_SIZE = 2048;
 
 const getPhotosBase = () => {
-  if (import.meta.env.DEV) {
-    // 开发环境使用子路径
-    return "/christmas-tree/photos";
-  } else {
-    // 生产环境使用根路径
-    return "/photos";
-  }
+  return "/photos";
 };
 
 const photosBase = getPhotosBase();
