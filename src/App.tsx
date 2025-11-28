@@ -21,7 +21,9 @@ const TOTAL_NUMBERED_PHOTOS = 31;
 const MAX_TEXTURE_SIZE = 2048;
 
 const getPhotosBase = () => {
-  return "./photos";
+  // 根据 Vite 的基础配置自动适配
+  const base = import.meta.env.BASE_URL;
+  return `${base}photos`;
 };
 
 const photosBase = getPhotosBase();
