@@ -24,7 +24,7 @@ const MAX_TEXTURE_SIZE = 2048;
 const photosBase = "/photos";
 const bodyPhotoPaths = [
   `${photosBase}/top.jpg`,
-  ...Array.from({ length: TOTAL_NUMBERED_PHOTOS }, (_, i) => `${photosBase}/${i + 1}.jpg`)
+  ...Array.from({ length: TOTAL_NUMBERED_PHOTOS }, (_, i) => `${photosBase}/100${i + 1}.jpg`)
 ];
 
 // --- 视觉配置 ---
